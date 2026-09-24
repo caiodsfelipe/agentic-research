@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-research"
+version = "0.1.0"
+description = "Multi-agent system that compares a project's code and docs with the state of the art and proposes next steps."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# Pinned for reproducibility: this is an application, not a library
+dependencies = [
+    "chromadb==1.5.9",
+    "langchain==1.4.2",
+    "langchain-chroma==1.1.0",
+    "langchain-core==1.6.4",
+    "langchain-mcp-adapters==0.3.2",
+    "langchain-openai==1.6.3",
+    "langchain-text-splitters==1.1.2",
+    "langgraph==1.2.12",
+    "langsmith==0.14.0",
+    "pydantic==2.12.5",
+    "pypdf==6.19.0",
+    "python-dotenv==1.2.2",
+    "streamlit==1.64.0",
+]
+
+[project.optional-dependencies]
+# Other LLM providers: install the extra matching the models in agentic_research/config.py
+google = ["langchain-google-genai==4.4.0"]
+evals = ["openevals==0.2.0"]
+dev = ["agentic-research[evals]", "pytest==9.1.1", "ruff==0.16.8"]
+
+[tool.setuptools.packages.find]
+include = ["agentic_research*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["evals/fixtures"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import sorting, pyupgrade, bugbear
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentic_research", "evals", "scripts"]

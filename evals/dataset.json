@@ -1,0 +1,185 @@
+[
+  {
+    "inputs": {
+      "question": "Our detector misses many flat polyps. Compared with the state of the art, what is the most promising way to improve recall on flat polyps?"
+    },
+    "outputs": {
+      "reference_answer": "The current pipeline is a frame-level detector whose only temporal information is a 5-frame majority vote, and flat polyps are only 8% of ColonSet-A. The literature shows clip-level temporal feature aggregation raised flat-polyp recall by about 12 points over frame-level detection with smoothing, so moving to a clip-level/temporal-context model is the most promising path, ideally with more flat-polyp data. Super-resolution was already tried and abandoned internally and the literature also finds no consistent gain, so it should not be proposed again.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "DATASET_NOTES.md",
+        "temporal_context_detection.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "dev"
+  },
+  {
+    "inputs": {
+      "question": "Can we trust our reported precision and recall when comparing with published results?"
+    },
+    "outputs": {
+      "reference_answer": "Not directly. ColonSet-A is split randomly by frame, so frames of the same patient and video appear in both train and test, which leaks information. The literature shows frame-level splits inflate F1 by 10-15 points and recommends patient-level (or video-level) splits plus lesion-level metrics. The reported F1 of 0.67 is therefore likely optimistic and not comparable with patient-level benchmarks; the first step is to re-split by patient and re-evaluate.",
+      "relevant_sources": [
+        "DATASET_NOTES.md",
+        "patient_level_splits.md",
+        "CURRENT_PIPELINE.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "test"
+  },
+  {
+    "inputs": {
+      "question": "Most of our false positives look like reflections. How do we improve precision?"
+    },
+    "outputs": {
+      "reference_answer": "Specular reflections are the main false-positive source in the current pipeline, and training uses only flip augmentation. The literature reports that hard negative mining of reflection frames plus synthetic specular-reflection augmentation improved precision by about 9 points without hurting recall. Raising the confidence threshold back to 0.5 is the superseded v1 policy and would trade away recall, so it is not the recommended fix.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "hard_negative_mining.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "dev"
+  },
+  {
+    "inputs": {
+      "question": "Should we try a transformer backbone to improve our metrics?"
+    },
+    "outputs": {
+      "reference_answer": "A Swin transformer backbone was already tried and abandoned: it overfit ColonSet-A and validation recall dropped from 0.71 to 0.66, because 12,000 frames were too few. It should only be revisited if something changes, such as much more data or pretraining; better candidates are temporal context for recall and hard negative mining for precision, after fixing the frame-level split.",
+      "relevant_sources": [
+        "EXPERIMENT_TRANSFORMER_BACKBONE.md",
+        "DATASET_NOTES.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "test"
+  },
+  {
+    "inputs": {
+      "question": "Describe our current production pipeline and how it differs from the state of the art."
+    },
+    "outputs": {
+      "reference_answer": "Production is detector v3: a YOLO-style frame detector trained with focal loss at 640x640 on ColonSet-A with flip-only augmentation, a 5-frame majority-vote smoothing, a 0.25 confidence threshold and IoU 0.5 frame-level evaluation (precision 0.64, recall 0.71, F1 0.67) on a random frame-level split. The literature differs by using clip-level temporal feature aggregation instead of post-hoc smoothing, patient-level splits with lesion-level metrics, and hard negative mining with reflection augmentation. Super-resolution and the Swin backbone are past experiments, not part of production.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "temporal_context_detection.md",
+        "patient_level_splits.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "test"
+  },
+  {
+    "inputs": {
+      "question": "Would adding color and blur augmentation be enough to fix our false positives?"
+    },
+    "outputs": {
+      "reference_answer": "Probably not. Training currently uses only flip augmentation and most false positives are specular reflections. The literature reports that color and blur augmentation alone gave only about +2 precision points, while hard negative mining of reflection frames plus synthetic specular-reflection augmentation gave about +9 points without hurting recall. Color/blur augmentation is a cheap complement, but the targeted fix is hard negative mining with reflection augmentation.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "hard_negative_mining.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "test"
+  },
+  {
+    "inputs": {
+      "question": "Is the quality of our annotations a risk for the metrics?"
+    },
+    "outputs": {
+      "reference_answer": "Yes. ColonSet-A boxes were drawn by a single annotator and no inter-annotator agreement was measured, so label noise is unknown and the precision/recall ceiling may partly reflect annotation errors, especially on subtle flat polyps. A second annotator on a sample, with agreement measured, would quantify this. The provided literature does not cover annotation quality directly, so this conclusion comes from the internal dataset notes.",
+      "relevant_sources": [
+        "DATASET_NOTES.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "dev"
+  },
+  {
+    "inputs": {
+      "question": "Should we change the confidence threshold to improve our results?"
+    },
+    "outputs": {
+      "reference_answer": "The current threshold is 0.25, chosen to favor recall; the earlier 0.5 threshold (policy v1) is superseded because it kept false positives low at the cost of recall. Reverting to 0.5 is not recommended as a fix. Threshold changes only trade precision against recall; the literature points to hard negative mining for precision and temporal context for recall as ways to improve both, and any threshold choice should be re-tuned after moving to patient-level splits.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "THRESHOLD_POLICY_V1.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "dev"
+  },
+  {
+    "inputs": {
+      "question": "We want our results to be comparable with published benchmarks. What should change in our evaluation?"
+    },
+    "outputs": {
+      "reference_answer": "Evaluation is currently frame-level only (precision/recall/F1 at IoU 0.5) on a random frame-level split, where frames of the same patient appear in train and test. The literature recommends patient-level (or video-level) splits and lesion-level metrics in addition to frame-level ones, since frame-level splits inflate F1 by 10-15 points. So: re-split ColonSet-A by patient, add lesion-level metrics, and re-establish the baseline before comparing with published results.",
+      "relevant_sources": [
+        "CURRENT_PIPELINE.md",
+        "DATASET_NOTES.md",
+        "patient_level_splits.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "test"
+  },
+  {
+    "inputs": {
+      "question": "A new super-resolution model came out. Is it worth trying super-resolution again for flat polyps?"
+    },
+    "outputs": {
+      "reference_answer": "Unlikely. Super-resolution was already tried internally and abandoned: F1 changed by only +0.003 while inference time doubled, with no gain on flat polyps. The literature review also finds no consistent detection gain (-1 to +1 F1) and notes earlier gains vanished under patient-level splits. It should only be revisited with a specific reason why the new model would change this; temporal context is the better-supported path for flat polyps.",
+      "relevant_sources": [
+        "EXPERIMENT_SUPER_RESOLUTION.md",
+        "super_resolution_review.md"
+      ],
+      "historical_approaches": [
+        "super-resolution preprocessing",
+        "transformer (Swin) backbone",
+        "confidence threshold 0.5"
+      ]
+    },
+    "split": "dev"
+  }
+]
