@@ -1,7 +1,7 @@
 """
 Retrieval from the two knowledge bases in VECTOR_STORE_DIR:
 - internal/: the project's own docs, balanced between what is in production and past attempts.
-- external/: the state of the art literature.
+- external/: the papers selected by the user.
 
 Every excerpt is prefixed with "[source: <path>]" (plus "| status: <status>" for internal docs),
 so the agents and the UI can tell documents apart.

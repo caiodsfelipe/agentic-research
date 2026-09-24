@@ -10,6 +10,8 @@ load_dotenv()
 
 import streamlit as st  # noqa: E402
 
+from agentic_research.config import get_node_settings  # noqa: E402
+from agentic_research.llm import MAX_TEMPERATURE, MIN_TEMPERATURE, supports_temperature  # noqa: E402
 from agentic_research.runner import run_research  # noqa: E402
 from agentic_research.tools.memory import load_history  # noqa: E402
 
@@ -105,15 +107,45 @@ def draw_usage(usage: dict):
         column.caption(f"input {model_usage['input_tokens']:,} · output {model_usage['output_tokens']:,}")
 
 
-async def run_graph(question: str, boxes: dict) -> tuple[list, dict]:
+async def run_graph(question: str, boxes: dict, temperature: float | None) -> tuple[list, dict]:
     events = []
 
     def on_update(node: str, output: dict):
         events.append((node, output))
         draw(boxes, node, output)
 
-    _, usage = await run_research(question, on_update)
+    _, usage = await run_research(question, on_update, brainstormer_temperature=temperature)
     return events, usage
+
+
+@st.cache_data
+def cached_supports_temperature(node: str, model: str) -> bool | None:
+    # Looked up once per node and model, not on every Streamlit rerun
+    return supports_temperature(node)
+
+
+def creativity_input() -> float | None:
+    """Slider for the brainstormer's temperature, disabled with an explanation when its model doesn't support it."""
+    model = get_node_settings("brainstormer")["model"]
+    supported = cached_supports_temperature("brainstormer", model)
+    temperature = st.slider(
+        "Creativity (brainstormer temperature)",
+        min_value=MIN_TEMPERATURE,
+        max_value=MAX_TEMPERATURE,
+        value=MIN_TEMPERATURE,
+        step=0.1,
+        disabled=supported is False,
+        help="0 gives focused ideas; higher values give more varied ones. The other agents always stay deterministic.",
+    )
+    if supported is False:
+        st.caption(
+            f"The brainstormer model (`{model}`) does not accept a temperature with its current settings, "
+            "so creativity can't be adjusted (see `agentic_research/config.py`)."
+        )
+        return None
+    if supported is None:
+        st.caption(f"Couldn't verify whether `{model}` supports temperature; the run will fail if it doesn't.")
+    return temperature
 
 
 def draw_history_sidebar():
@@ -125,6 +157,8 @@ def draw_history_sidebar():
     for record in history:
         with st.sidebar.expander(f"{record['date'].replace('T', ' ')} · {record['question'][:60]}"):
             st.markdown(f"**Question:** {format_item(record['question'])}")
+            if record.get("brainstormer_temperature") is not None:
+                st.caption(f"Creativity: {record['brainstormer_temperature']}")
             render_result(st, record["comparison"])
             render_result(st, record["ideas"])
 
@@ -132,15 +166,16 @@ def draw_history_sidebar():
 draw_history_sidebar()
 
 st.title("Agentic Research")
-st.caption("Compares the codebase and internal docs with the state of the art, then proposes next steps.")
+st.caption("Compares your codebase and internal docs with your selected papers to brainstorm research directions.")
 
 question = st.text_area("Research question", height=120)
+temperature = creativity_input()
 run = st.button("Run", type="primary", disabled=not question.strip())
 
 if run:
     boxes = create_boxes()
     boxes["code"].update(label="Code reader: running…", state="running", expanded=True)
-    events, usage = asyncio.run(run_graph(question, boxes))
+    events, usage = asyncio.run(run_graph(question, boxes, temperature))
     st.session_state["last_run"] = {"events": events, "usage": usage}
     draw_usage(usage)
 elif "last_run" in st.session_state:

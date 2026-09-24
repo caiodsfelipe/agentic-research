@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentic-research"
 version = "0.1.0"
-description = "Multi-agent system that compares a project's code and docs with the state of the art and proposes next steps."
+description = "Multi-agent system that compares a codebase and its docs with selected papers to brainstorm research directions."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -1,15 +1,15 @@
 # Agentic Research
 
 A multi-agent system that compares **what your project does** (its code and internal docs) with
-**the state of the art** (a library of papers), and proposes where to go next.
+**a set of papers you select**, to brainstorm ideas and research directions.
 
-Ask a question such as *"Our recall is stuck, what does the literature do differently and what should
-we try first?"* and the agents:
+Ask a question such as *"Our recall is stuck, what do these papers do differently and what should we
+try first?"* and the agents:
 
 1. **Code reader** explores your codebase with [Serena](https://github.com/oraios/serena) (read-only code navigation tools).
 2. **Internal librarian** retrieves your project docs, keeping what is in production (`current`) apart from past attempts (`historical`, `superseded`).
 3. **External librarian** retrieves relevant excerpts from your paper library.
-4. **Differ** compares the project with the literature, tagging every internal claim as `[current]` or `[historical]`.
+4. **Differ** compares the project with the papers, tagging every internal claim as `[current]` or `[historical]`.
 5. **Brainstormer** turns the comparison into ideas and next steps, ranked by expected impact, without re-proposing approaches that already failed.
 
 ```mermaid
@@ -74,12 +74,19 @@ streamlit run app.py                         # web UI: live agent outputs, sourc
 python main.py "What should we try first?"   # command line
 ```
 
+**Creativity:** the brainstormer's temperature can be raised for more varied ideas, with the slider in the UI
+or `--temperature` (0 to 1) in the CLI. The default is 0, and the other agents always stay deterministic,
+so the comparison itself doesn't get noisier. Temperature support is detected from LangChain's model
+profile and from whether the model client keeps the value with its configured options: if the brainstormer's
+model doesn't accept one (e.g. reasoning models such as o3, or OpenAI gpt-5 models without
+`reasoning_effort="none"`), the slider is disabled with an explanation and the CLI reports an error before running.
+
 Every finished run is recorded in `research_history.jsonl` (override with `RESEARCH_HISTORY_PATH`) and
 listed in the UI sidebar. The history is a record only: it is never fed back into the agents.
 
 ## Configuration
 
-- `agentic_research/config.py`: the model and token limits of every agent. Models use LangChain's
+- `agentic_research/config.py`: the model, token limits and model options of every agent. Models use LangChain's
   `provider:model` format (e.g. `openai:gpt-5.4-mini`, `google_genai:gemini-3.6-flash`), so any
   provider supported by `init_chat_model` works once its integration package is installed
   (e.g. `pip install -e ".[google]"`).

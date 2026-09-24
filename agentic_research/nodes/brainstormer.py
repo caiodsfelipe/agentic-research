@@ -1,4 +1,5 @@
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 
 from agentic_research.llm import get_llm
@@ -14,7 +15,7 @@ class Ideas(BaseModel):
 
 # Gets the comparison from the differ and brainstorms ideas and next steps for the project.
 # The goal is to find implementation holes, methodology flaws, areas for improvement, among others.
-async def brainstormer(state: AppState) -> dict:
+async def brainstormer(state: AppState, config: RunnableConfig) -> dict:
     # Create a system message with the brainstorming prompt
     system_message = SystemMessage(content=BRAINSTORMER_PROMPT)
 
@@ -23,8 +24,11 @@ async def brainstormer(state: AppState) -> dict:
         content=(f"Research Question:\n{state['user_input']}\n\nComparison Result:\n{state.get('comparison', '')}")
     )
 
+    # Optional creativity setting for this run (see run_research); the other agents always stay deterministic
+    temperature = config.get("configurable", {}).get("brainstormer_temperature")
+
     # Get the LLM instance, constrained to the Ideas schema so the output is always valid JSON
-    llm = get_llm("brainstormer").with_structured_output(Ideas)
+    llm = get_llm("brainstormer", temperature=temperature).with_structured_output(Ideas)
 
     # Use the LLM to brainstorm ideas based on the comparison result
     brainstorming_result = await llm.ainvoke(fit_messages([system_message, human_message], "brainstormer"))

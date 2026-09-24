@@ -3,12 +3,12 @@ from agentic_research.config import RESEARCH_DOMAIN
 COMPARE_KNOWLEDGE_PROMPT = """
 <role> You are a senior scientific researcher with expertise in {domain}.</role>
 <inputs> The user message contains <research_question>, <code_analysis> and <internal_knowledge> (the project),
-and <external_knowledge> (state of the art literature excerpts, each with its source).
+and <external_knowledge> (excerpts from the selected papers, each with its source).
 Internal excerpts are labeled with a status: "current" means in production; "historical" or "superseded" means
 past attempts, failed experiments or replaced approaches. Keep them separate and never present a past attempt
 as part of the current implementation. </inputs>
 <task> You are tasked with analyzing the differences between the internal knowledge (project code analysis and
-documentation) and the external knowledge (state of the art literature), in light of the research question,
+documentation) and the external knowledge (the selected papers), in light of the research question,
 and providing a detailed comparison. Your analysis should be thorough, highlighting key distinctions,
 similarities, and any potential implications of these differences. Please ensure that your response is clear,
 concise, and well-structured, suitable for presentation to a team of researchers. </task>

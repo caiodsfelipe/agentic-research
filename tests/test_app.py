@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from agentic_research import llm
 from agentic_research.prompts import BRAINSTORMER_PROMPT, CODE_READER_PROMPT, COMPARE_KNOWLEDGE_PROMPT
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
@@ -21,3 +23,15 @@ def test_app_loads_and_lists_saved_history(tmp_path, monkeypatch):
 
     assert not app.exception
     assert [expander.label for expander in app.sidebar.expander] == ["2026-01-01 10:00 · Q?"]
+
+
+def test_creativity_slider_is_disabled_when_the_model_does_not_support_temperature(tmp_path, monkeypatch):
+    monkeypatch.setenv("RESEARCH_HISTORY_PATH", str(tmp_path / "history.jsonl"))
+    monkeypatch.setattr(llm, "supports_temperature", lambda node: False)
+    st.cache_data.clear()
+
+    app = AppTest.from_file(str(APP)).run()
+
+    assert app.slider[0].disabled
+    assert any("does not accept a temperature" in caption.value for caption in app.caption)
+    st.cache_data.clear()

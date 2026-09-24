@@ -16,11 +16,12 @@ def _history_path() -> Path:
     return Path(os.getenv("RESEARCH_HISTORY_PATH", default))
 
 
-def save_research(state: AppState, question: str) -> None:
+def save_research(state: AppState, question: str, brainstormer_temperature: float | None = None) -> None:
     # Save the research question, comparison, and ideas to the history file
     record = {
         "date": datetime.now().isoformat(timespec="minutes"),
         "question": question,
+        "brainstormer_temperature": brainstormer_temperature,
         "comparison": state.get("comparison", ""),
         "ideas": state.get("ideas", ""),
     }

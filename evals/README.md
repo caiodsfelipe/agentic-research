@@ -35,7 +35,7 @@ on any private data:
 
 - `codebase/`: the code the code reader explores.
 - `internal_docs/`: project docs with a `status` in their front matter (`current`, `historical`, `superseded`).
-- `external_papers/`: invented "state of the art" papers.
+- `external_papers/`: invented papers (the "selected papers" of the fictional project).
 
 The facts are planted so that each question has a known best answer (for example, the dataset is split
 by frame, and a paper shows that frame-level splits inflate F1).

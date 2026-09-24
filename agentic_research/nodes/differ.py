@@ -14,8 +14,8 @@ class Comparison(BaseModel):
     implications: list[str]
 
 
-# Compares the internal knowledge (code analysis and internal docs) with the external knowledge (the literature).
-# The goal is to understand how the project's implementation differs from the state of the art.
+# Compares the internal knowledge (code analysis and internal docs) with the external knowledge (the selected papers).
+# The goal is to understand how the project's implementation differs from the approaches in those papers.
 async def differ(state: AppState) -> dict:
     # Create a system message with the comparison prompt
     system_message = SystemMessage(content=COMPARE_KNOWLEDGE_PROMPT)
