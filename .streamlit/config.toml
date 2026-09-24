@@ -1,0 +1,18 @@
+# Streamlit settings for the web UI (app.py).
+# Light and dark variants are both defined, so the app keeps following the viewer's light or dark mode
+# (options set directly under [theme] would create a single custom theme and disable the automatic dark mode).
+
+[client]
+toolbarMode = "minimal"
+
+[theme.light]
+primaryColor = "#4F46E5"
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showSidebarBorder = true
+
+[theme.dark]
+primaryColor = "#6366F1"
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showSidebarBorder = true

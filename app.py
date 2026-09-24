@@ -1,3 +1,8 @@
+"""
+Web UI for the research agents: streams each agent's progress, then shows the next steps, the comparison
+and the evidence behind it. Run with: streamlit run app.py
+"""
+
 import asyncio
 import json
 import re
@@ -10,27 +15,34 @@ load_dotenv()
 
 import streamlit as st  # noqa: E402
 
-from agentic_research.config import get_node_settings  # noqa: E402
-from agentic_research.llm import MAX_TEMPERATURE, MIN_TEMPERATURE, supports_temperature  # noqa: E402
+from agentic_research.config import NODE_SETTINGS, get_node_settings  # noqa: E402
+from agentic_research.llm import supports_temperature  # noqa: E402
 from agentic_research.runner import run_research  # noqa: E402
 from agentic_research.tools.memory import load_history  # noqa: E402
-
-# Streamlit UI for the research graph: streams each node's output as the graph runs.
-# Run with: streamlit run app.py
 
 SOURCE_LINE = re.compile(r"^\[source: (.+?)(?: \| status: ([\w-]+))?\]$", re.M)
 STATUS_COLORS = {"current": "green", "historical": "orange", "superseded": "orange", "retracted": "red"}
 
-st.set_page_config(page_title="Agentic Research", layout="wide")
+# Creativity presets for the brainstormer's temperature (0 to 1); the other agents always stay deterministic
+CREATIVITY_LEVELS = {"Focused": 0.0, "Balanced": 0.4, "Exploratory": 0.8}
+
+st.set_page_config(page_title="Agentic Research", page_icon=":material/science:", layout="wide")
 
 
-def parse_json(text: str):
+# ---------- Formatting helpers ----------
+
+
+def parse_json(text: str) -> dict | None:
+    """Parses an agent's JSON answer into {section: [items]}, or None when it isn't a non-empty JSON object."""
     # Models sometimes wrap JSON in ```json fences
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
-        return json.loads(cleaned)
+        data = json.loads(cleaned)
     except json.JSONDecodeError:
         return None
+    if not isinstance(data, dict) or not data:
+        return None
+    return {key: items if isinstance(items, list) else [items] for key, items in data.items()}
 
 
 def format_item(item) -> str:
@@ -41,70 +53,148 @@ def format_item(item) -> str:
     return text
 
 
-def render_result(box, text: str):
-    # Renders a JSON answer ({"key": [items]}) as titled bullet lists, falling back to raw text
-    data = parse_json(text)
-    if not isinstance(data, dict):
+def file_name(source: str) -> str:
+    # PureWindowsPath understands both / and \ separators, so file names work for sources from any OS
+    return PureWindowsPath(source).name
+
+
+def short_model(model: str) -> str:
+    return model.split(":", 1)[-1]
+
+
+def shorten(text: str, limit: int = 55) -> str:
+    # Cuts at a word boundary, so labels never end mid-word
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
+
+
+# ---------- Result renderers (shared by live runs, replays and the history sidebar) ----------
+
+
+def render_raw(box, text: str):
+    # Fallback for answers that aren't the expected JSON (or are empty, like "" or "{}")
+    if text.strip() in ("", "{}", "[]"):
+        box.caption("Nothing reported.")
+    else:
         box.markdown(format_item(text))
+
+
+def render_next_steps(box, ideas_text: str):
+    data = parse_json(ideas_text)
+    if data is None:
+        render_raw(box, ideas_text)
+        return
+    solutions, ideas = data.get("solutions", []), data.get("ideas", [])
+    if solutions:
+        box.success(f"**Start here:** {format_item(solutions[0])}", icon=":material/flag:")
+        if len(solutions) > 1:
+            box.markdown("\n".join(f"{i}. {format_item(s)}" for i, s in enumerate(solutions[1:], start=2)))
+    if ideas:
+        box.markdown("**More ideas**")
+        box.markdown("\n".join(f"- {format_item(idea)}" for idea in ideas))
+
+
+def render_comparison(box, comparison_text: str):
+    data = parse_json(comparison_text)
+    if data is None:
+        render_raw(box, comparison_text)
+        return
+    tabs = box.tabs([f"{key.capitalize()} ({len(items)})" for key, items in data.items()])
+    for tab, items in zip(tabs, data.values(), strict=True):
+        tab.markdown("\n".join(f"- {format_item(item)}" for item in items) or "_Nothing reported._")
+
+
+def render_code_analysis(box, analysis_text: str):
+    data = parse_json(analysis_text)
+    if data is None:
+        render_raw(box, analysis_text)
         return
     for key, items in data.items():
         box.markdown(f"**{key.replace('_', ' ').capitalize()}**")
-        for item in items if isinstance(items, list) else [items]:
-            box.markdown(f"- {format_item(item)}")
+        box.markdown("\n".join(f"- {format_item(item)}" for item in items) or "_Nothing reported._")
 
 
 def render_sources(box, text: str):
-    for source, status in SOURCE_LINE.findall(text):
+    sources = SOURCE_LINE.findall(text)
+    if not sources:
+        box.caption("No excerpts retrieved.")
+        return
+    for source, status in sources:
         badge = f":{STATUS_COLORS.get(status, 'gray')}-badge[{status}] " if status else ""
-        # PureWindowsPath understands both / and \ separators, so file names work for sources from any OS
-        box.markdown(f"- {badge}`{PureWindowsPath(source).name}`")
-    with box.expander("Retrieved excerpts"):
-        st.text(text)
+        box.markdown(f"- {badge}`{file_name(source)}`")
+    box.caption("Excerpts")
+    box.text(text)
+
+
+# ---------- Live run layout ----------
 
 
 def create_boxes() -> dict:
-    code = st.status("Code reader", expanded=False)
-    internal_column, external_column = st.columns(2)
-    internal = internal_column.container(border=True)
-    internal.markdown("#### Internal knowledge")
-    external = external_column.container(border=True)
-    external.markdown("#### External knowledge")
+    progress = st.status("Researching…", expanded=True)
+
+    next_steps = st.container(border=True)
+    next_steps.subheader("Next steps", anchor=False)
+    next_steps_body = next_steps.empty()
+    next_steps_body.caption("Waiting for the comparison…")
+
     comparison = st.container(border=True)
-    comparison.markdown("#### Comparison")
-    ideas = st.container(border=True)
-    ideas.markdown("#### Ideas")
-    return {"code": code, "internal": internal, "external": external, "comparison": comparison, "ideas": ideas}
+    comparison.subheader("Comparison", anchor=False)
+    comparison_body = comparison.empty()
+    comparison_body.caption("Waiting for the code analysis and sources…")
+
+    evidence = st.expander("Evidence: code analysis, project docs and papers", icon=":material/menu_book:")
+    code_tab, internal_tab, papers_tab = evidence.tabs(["Code analysis", "Project docs", "Papers"])
+
+    return {
+        "progress": progress,
+        "next_steps": next_steps_body,
+        "comparison": comparison_body,
+        "code": code_tab,
+        "internal": internal_tab,
+        "papers": papers_tab,
+    }
+
+
+def describe_tool_call(call: dict) -> str:
+    args = ", ".join(f"{key}={value!r}" for key, value in call["args"].items())
+    return f"`{call['name']}({args[:90]}{'…' if len(args) > 90 else ''})`"
 
 
 def draw(boxes: dict, node: str, output: dict):
-    # Draws one node update into its box; used both while streaming and when replaying a stored run
+    # Draws one node update; used both while streaming and when replaying the last run
+    progress = boxes["progress"]
     if node == "code_reader":
         message = output["messages"][0]
         for call in message.tool_calls:
-            boxes["code"].markdown(f"`{call['name']}` {json.dumps(call['args'], ensure_ascii=False)}")
+            progress.markdown(f":material/search: Reading the codebase: {describe_tool_call(call)}")
         if not message.tool_calls:
-            boxes["code"].update(label=f"Code reader: done ({output['tool_steps'] - 1} tool calls)", state="complete")
-            render_result(boxes["code"], output["code_analysis"])
-    elif node == "execute_tools":
-        for message in output["messages"]:
-            boxes["code"].caption(message.text[:300])
+            progress.markdown(f":material/code: Code analysis ready ({output['tool_steps'] - 1} tool calls)")
+            render_code_analysis(boxes["code"], output["code_analysis"])
     elif node == "internal_librarian":
+        count = len(SOURCE_LINE.findall(output["internal_knowledge"]))
+        progress.markdown(f":material/folder_open: Retrieved {count} excerpts from the project docs")
         render_sources(boxes["internal"], output["internal_knowledge"])
     elif node == "external_librarian":
-        render_sources(boxes["external"], output["external_knowledge"])
+        count = len(SOURCE_LINE.findall(output["external_knowledge"]))
+        progress.markdown(f":material/article: Retrieved {count} excerpts from the papers")
+        render_sources(boxes["papers"], output["external_knowledge"])
     elif node == "differ":
-        render_result(boxes["comparison"], output["comparison"])
+        progress.markdown(":material/compare_arrows: Comparison ready")
+        render_comparison(boxes["comparison"].container(), output["comparison"])
+        boxes["next_steps"].caption("Brainstorming…")
     elif node == "brainstormer":
-        render_result(boxes["ideas"], output["ideas"])
+        render_next_steps(boxes["next_steps"].container(), output["ideas"])
+        progress.update(label="Research complete", state="complete", expanded=False)
 
 
 def draw_usage(usage: dict):
-    st.markdown("#### Token usage")
-    columns = st.columns(max(len(usage), 1))
-    # strict=False: with no usage there is still one (empty) column
-    for column, (model, model_usage) in zip(columns, usage.items(), strict=False):
-        column.metric(model, f"{model_usage['total_tokens']:,} tokens")
-        column.caption(f"input {model_usage['input_tokens']:,} · output {model_usage['output_tokens']:,}")
+    parts = [
+        f"{model}: {u['total_tokens']:,} tokens ({u['input_tokens']:,} in · {u['output_tokens']:,} out)"
+        for model, u in usage.items()
+    ]
+    if parts:
+        st.caption(":material/toll: " + "  ·  ".join(parts))
 
 
 async def run_graph(question: str, boxes: dict, temperature: float | None) -> tuple[list, dict]:
@@ -118,6 +208,9 @@ async def run_graph(question: str, boxes: dict, temperature: float | None) -> tu
     return events, usage
 
 
+# ---------- Inputs ----------
+
+
 @st.cache_data
 def cached_supports_temperature(node: str, model: str) -> bool | None:
     # Looked up once per node and model, not on every Streamlit rerun
@@ -125,62 +218,109 @@ def cached_supports_temperature(node: str, model: str) -> bool | None:
 
 
 def creativity_input() -> float | None:
-    """Slider for the brainstormer's temperature, disabled with an explanation when its model doesn't support it."""
+    """Compact creativity selector, disabled with an explanation when the brainstormer's model has no temperature."""
     model = get_node_settings("brainstormer")["model"]
     supported = cached_supports_temperature("brainstormer", model)
-    temperature = st.slider(
-        "Creativity (brainstormer temperature)",
-        min_value=MIN_TEMPERATURE,
-        max_value=MAX_TEMPERATURE,
-        value=MIN_TEMPERATURE,
-        step=0.1,
+    level = st.segmented_control(
+        "Creativity",
+        options=list(CREATIVITY_LEVELS),
+        default="Focused",
+        required=True,
         disabled=supported is False,
-        help="0 gives focused ideas; higher values give more varied ones. The other agents always stay deterministic.",
+        help="How varied the brainstormed ideas are (brainstormer temperature: "
+        + ", ".join(f"{name} {value}" for name, value in CREATIVITY_LEVELS.items())
+        + "). The code analysis and the comparison always stay deterministic.",
     )
     if supported is False:
         st.caption(
-            f"The brainstormer model (`{model}`) does not accept a temperature with its current settings, "
-            "so creativity can't be adjusted (see `agentic_research/config.py`)."
+            f":material/info: The brainstormer model (`{model}`) does not accept a temperature with its current "
+            "settings, so creativity can't be adjusted (see `agentic_research/config.py`)."
         )
         return None
     if supported is None:
-        st.caption(f"Couldn't verify whether `{model}` supports temperature; the run will fail if it doesn't.")
-    return temperature
+        st.caption(f":material/info: Couldn't verify whether `{model}` accepts a temperature.")
+    return CREATIVITY_LEVELS[level]
 
 
-def draw_history_sidebar():
-    # Browsable record of past runs; it is never fed back into the agents
-    st.sidebar.markdown("### Research history")
-    history = load_history()
-    if not history:
-        st.sidebar.caption("No saved runs yet.")
-    for record in history:
-        with st.sidebar.expander(f"{record['date'].replace('T', ' ')} · {record['question'][:60]}"):
-            st.markdown(f"**Question:** {format_item(record['question'])}")
-            if record.get("brainstormer_temperature") is not None:
-                st.caption(f"Creativity: {record['brainstormer_temperature']}")
-            render_result(st, record["comparison"])
-            render_result(st, record["ideas"])
+def draw_empty_state():
+    steps = [
+        (":material/code:", "Reads your code", "A code reader explores the codebase with read-only tools."),
+        (":material/library_books:", "Retrieves evidence", "Your project docs and your selected papers."),
+        (":material/lightbulb:", "Compares and brainstorms", "Differences with the papers, then ranked next steps."),
+    ]
+    for column, (icon, title, text) in zip(st.columns(len(steps)), steps, strict=True):
+        with column.container(border=True):
+            st.markdown(f"{icon} **{title}**")
+            st.caption(text)
 
 
-draw_history_sidebar()
+# ---------- Sidebar ----------
 
-st.title("Agentic Research")
+
+def draw_sidebar():
+    with st.sidebar:
+        st.markdown("### :material/history: Research history")
+        history = load_history()
+        if not history:
+            st.caption("Finished runs appear here.")
+        for record in history:
+            with st.expander(shorten(record["question"])):
+                details = [record["date"].replace("T", " ")]
+                if record.get("brainstormer_temperature") is not None:
+                    details.append(f"creativity {record['brainstormer_temperature']}")
+                st.caption(" · ".join(details))
+                st.markdown(f"**{format_item(record['question'])}**")
+                next_steps_tab, comparison_tab = st.tabs(["Next steps", "Comparison"])
+                render_next_steps(next_steps_tab, record["ideas"])
+                render_comparison(comparison_tab, record["comparison"])
+
+        st.divider()
+        # Two trailing spaces make a Markdown line break
+        lines = [
+            f"{node.replace('_', ' ').capitalize()}: {short_model(settings['model'])}"
+            for node, settings in NODE_SETTINGS.items()
+            if node != "default"
+        ]
+        st.caption("  \n".join(["**Models**", *lines]))
+
+
+# ---------- Page ----------
+
+draw_sidebar()
+
+st.title("Agentic Research", anchor=False)
 st.caption("Compares your codebase and internal docs with your selected papers to brainstorm research directions.")
 
-question = st.text_area("Research question", height=120)
-temperature = creativity_input()
-run = st.button("Run", type="primary", disabled=not question.strip())
+with st.form("research"):
+    question = st.text_area(
+        "Research question",
+        placeholder="e.g. Our recall is stuck. What do the selected papers do differently? What should we try first?",
+        height=110,
+        label_visibility="collapsed",
+    )
+    creativity_column, run_column = st.columns([4, 1], vertical_alignment="bottom")
+    with creativity_column:
+        temperature = creativity_input()
+    with run_column:
+        run = st.form_submit_button("Run research", type="primary", icon=":material/play_arrow:", width="stretch")
 
-if run:
+if run and not question.strip():
+    st.warning("Type a research question first.", icon=":material/edit:")
+elif run:
     boxes = create_boxes()
-    boxes["code"].update(label="Code reader: running…", state="running", expanded=True)
-    events, usage = asyncio.run(run_graph(question, boxes, temperature))
-    st.session_state["last_run"] = {"events": events, "usage": usage}
-    draw_usage(usage)
+    try:
+        events, usage = asyncio.run(run_graph(question, boxes, temperature))
+    except Exception as error:
+        boxes["progress"].update(label="Research failed", state="error", expanded=True)
+        st.error(f"{type(error).__name__}: {error}", icon=":material/error:")
+    else:
+        st.session_state["last_run"] = {"events": events, "usage": usage}
+        draw_usage(usage)
 elif "last_run" in st.session_state:
     # Streamlit reruns the script on every interaction, so the last run is redrawn from session state
     boxes = create_boxes()
     for node, output in st.session_state["last_run"]["events"]:
         draw(boxes, node, output)
     draw_usage(st.session_state["last_run"]["usage"])
+else:
+    draw_empty_state()
